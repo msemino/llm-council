@@ -10,15 +10,15 @@ export default function Sidebar({
   return (
     <div className="sidebar">
       <div className="sidebar-header">
-        <h1>LLM Council</h1>
+        <h1>Consejo LLM ⚔️</h1>
         <button className="new-conversation-btn" onClick={onNewConversation}>
-          + New Conversation
+          + Nueva Conversacion
         </button>
       </div>
 
       <div className="conversation-list">
         {conversations.length === 0 ? (
-          <div className="no-conversations">No conversations yet</div>
+          <div className="no-conversations">Sin conversaciones aun</div>
         ) : (
           conversations.map((conv) => (
             <div
@@ -29,10 +29,10 @@ export default function Sidebar({
               onClick={() => onSelectConversation(conv.id)}
             >
               <div className="conversation-title">
-                {conv.title || 'New Conversation'}
+                {conv.title || 'Nueva Conversacion'}
               </div>
               <div className="conversation-meta">
-                {conv.message_count} messages
+                {conv.message_count} mensajes
               </div>
             </div>
           ))

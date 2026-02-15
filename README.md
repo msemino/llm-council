@@ -1,87 +1,138 @@
-# LLM Council
+# LLM Council - Arena de Batalla de Modelos
 
 ![llmcouncil](header.jpg)
 
-The idea of this repo is that instead of asking a question to your favorite LLM provider (e.g. OpenAI GPT 5.1, Google Gemini 3.0 Pro, Anthropic Claude Sonnet 4.5, xAI Grok 4, eg.c), you can group them into your "LLM Council". This repo is a simple, local web app that essentially looks like ChatGPT except it uses OpenRouter to send your query to multiple LLMs, it then asks them to review and rank each other's work, and finally a Chairman LLM produces the final response.
+> Fork personalizado del [llm-council de Karpathy](https://github.com/karpathy/llm-council) con UI tipo "arena de batalla", selector dinamico de modelos gratuitos, y respuestas 100% en espanol.
 
-In a bit more detail, here is what happens when you submit a query:
+## Que es esto?
 
-1. **Stage 1: First opinions**. The user query is given to all LLMs individually, and the responses are collected. The individual responses are shown in a "tab view", so that the user can inspect them all one by one.
-2. **Stage 2: Review**. Each individual LLM is given the responses of the other LLMs. Under the hood, the LLM identities are anonymized so that the LLM can't play favorites when judging their outputs. The LLM is asked to rank them in accuracy and insight.
-3. **Stage 3: Final response**. The designated Chairman of the LLM Council takes all of the model's responses and compiles them into a single final answer that is presented to the user.
+En vez de preguntar a un solo LLM, esta app envia tu pregunta a **multiples modelos de IA simultaneamente**, los hace evaluarse entre si, y un modelo "presidente" sintetiza la mejor respuesta final.
 
-## Vibe Code Alert
+### Las 3 Rondas de la Batalla
 
-This project was 99% vibe coded as a fun Saturday hack because I wanted to explore and evaluate a number of LLMs side by side in the process of [reading books together with LLMs](https://x.com/karpathy/status/1990577951671509438). It's nice and useful to see multiple responses side by side, and also the cross-opinions of all LLMs on each other's outputs. I'm not going to support it in any way, it's provided here as is for other people's inspiration and I don't intend to improve it. Code is ephemeral now and libraries are over, ask your LLM to change it in whatever way you like.
+1. **Ronda 1 - Respuestas individuales**: Tu pregunta se envia en paralelo a todos los modelos seleccionados. Se muestran las respuestas lado a lado en paneles con colores y emojis por modelo. Incluye mecanismo de **retry automatico** si menos de 2 modelos responden (reintenta modelos fallidos + usa modelos de respaldo).
+
+2. **Ronda 2 - Evaluaciones cruzadas**: Cada modelo evalua las respuestas de los demas (anonimizadas como "Response A", "Response B", etc.) y genera un ranking. Se calcula un **ranking agregado** tipo podio.
+
+3. **Ronda 3 - Veredicto del Presidente**: Un modelo designado como presidente analiza todas las respuestas + evaluaciones y sintetiza una respuesta final concisa (3-4 parrafos max).
+
+## Diferencias vs el Original
+
+| Feature | Karpathy original | Este fork |
+|---------|------------------|-----------|
+| Selector de modelos | Hardcoded en config.py | **UI dinamica** con 30+ modelos gratuitos |
+| Cantidad de modelos | Fijo (4) | **Configurable 2-6** desde el frontend |
+| Modelo presidente | Fijo | **Seleccionable** por separado |
+| Respuesta presidente | Larga | **Corta y concisa** (3-4 parrafos) |
+| Idioma | Ingles | **Todo en espanol** |
+| Retry/Fallback | No | **Si** - reintenta fallidos + modelos de respaldo |
+| Nombres de modelos | Ocultos durante carga | **Visibles siempre** con emoji y color |
+| UI | Tabs basicos | **Arena de batalla** con paneles lado a lado, podio, timeline en vivo |
+| Modelos | De pago (GPT-5, Claude, etc.) | **100% gratuitos** via OpenRouter |
+
+## Screenshots
+
+La UI muestra:
+- Panel de configuracion con selector de cantidad (2-6) y dropdowns por modelo
+- Arena en vivo con badge "EN VIVO" durante la batalla
+- Paneles lado a lado con shimmer loading y nombres reales
+- Tabs de evaluacion por modelo con de-anonimizacion
+- Podio con ranking agregado y barras de colores
+- Veredicto del presidente conciso
 
 ## Setup
 
-### 1. Install Dependencies
+### 1. Requisitos
 
-The project uses [uv](https://docs.astral.sh/uv/) for project management.
+- Python 3.10+ con [uv](https://docs.astral.sh/uv/)
+- Node.js 18+
+- Una API key de [OpenRouter](https://openrouter.ai/) (los modelos gratuitos no requieren saldo)
 
-**Backend:**
+### 2. Instalar dependencias
+
 ```bash
+# Backend (Python)
 uv sync
+
+# Frontend (React)
+cd frontend && npm install && cd ..
 ```
 
-**Frontend:**
-```bash
-cd frontend
-npm install
-cd ..
-```
+### 3. Configurar API Key
 
-### 2. Configure API Key
-
-Create a `.env` file in the project root:
+Crea un archivo `.env` en la raiz del proyecto:
 
 ```bash
-OPENROUTER_API_KEY=sk-or-v1-...
+OPENROUTER_API_KEY=sk-or-v1-tu-api-key-aqui
 ```
 
-Get your API key at [openrouter.ai](https://openrouter.ai/). Make sure to purchase the credits you need, or sign up for automatic top up.
+Obtene tu API key gratis en [openrouter.ai/keys](https://openrouter.ai/keys).
 
-### 3. Configure Models (Optional)
+### 4. Ejecutar
 
-Edit `backend/config.py` to customize the council:
-
-```python
-COUNCIL_MODELS = [
-    "openai/gpt-5.1",
-    "google/gemini-3-pro-preview",
-    "anthropic/claude-sonnet-4.5",
-    "x-ai/grok-4",
-]
-
-CHAIRMAN_MODEL = "google/gemini-3-pro-preview"
+**Windows:**
+```bash
+start.bat
 ```
 
-## Running the Application
-
-**Option 1: Use the start script**
+**Linux/Mac:**
 ```bash
 ./start.sh
 ```
 
-**Option 2: Run manually**
+**O manualmente en dos terminales:**
 
-Terminal 1 (Backend):
 ```bash
+# Terminal 1 - Backend (puerto 8001)
 uv run python -m backend.main
+
+# Terminal 2 - Frontend (puerto 5173)
+cd frontend && npm run dev
 ```
 
-Terminal 2 (Frontend):
-```bash
-cd frontend
-npm run dev
-```
+Abrir http://localhost:5173 en el navegador.
 
-Then open http://localhost:5173 in your browser.
+## Como usar
+
+1. Click en **"+ Nueva Conversacion"**
+2. En el panel **"Configuracion de Batalla"**:
+   - Elegir cuantos modelos competiran (2-6)
+   - Seleccionar cada modelo del dropdown (30+ opciones gratuitas)
+   - Elegir el modelo presidente por separado
+3. Escribir tu pregunta y presionar Enter
+4. Ver la batalla en vivo con las 3 rondas
+
+## Arquitectura
+
+```
+llm-council/
+  backend/
+    main.py          # FastAPI + endpoints SSE streaming
+    council.py       # Orquestacion 3 etapas + retry/fallback
+    openrouter.py    # Cliente API OpenRouter + fetch modelos gratis
+    config.py        # Configuracion por defecto
+    storage.py       # Persistencia JSON
+  frontend/
+    src/
+      App.jsx                    # Estado global + manejo SSE
+      api.js                     # Cliente API con streaming SSE
+      components/
+        ModelSelector.jsx/css    # Selector de modelos + cantidad
+        ProcessTimeline.jsx/css  # Arena de batalla (paneles, podio, chairman)
+        ChatInterface.jsx/css    # Chat principal
+        Sidebar.jsx              # Lista de conversaciones
+```
 
 ## Tech Stack
 
-- **Backend:** FastAPI (Python 3.10+), async httpx, OpenRouter API
-- **Frontend:** React + Vite, react-markdown for rendering
-- **Storage:** JSON files in `data/conversations/`
-- **Package Management:** uv for Python, npm for JavaScript
+- **Backend:** FastAPI, async httpx, SSE (Server-Sent Events)
+- **Frontend:** React 18 + Vite, react-markdown
+- **API:** OpenRouter (proxy para 30+ proveedores de LLM)
+- **Storage:** JSON files en `data/conversations/`
+- **Package Management:** uv (Python), npm (JS)
+
+## Creditos
+
+- Idea original: [Andrej Karpathy](https://github.com/karpathy/llm-council)
+- Fork con UI arena, selector dinamico, retry, y espanol: [msemino](https://github.com/msemino)
+- Vibe coded con Claude Code (Opus 4.6)

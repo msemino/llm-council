@@ -23,12 +23,12 @@ export default function Stage2({ rankings, labelToModel, aggregateRankings }) {
 
   return (
     <div className="stage stage2">
-      <h3 className="stage-title">Stage 2: Peer Rankings</h3>
+      <h3 className="stage-title">Etapa 2: Rankings de Pares</h3>
 
-      <h4>Raw Evaluations</h4>
+      <h4>Evaluaciones</h4>
       <p className="stage-description">
-        Each model evaluated all responses (anonymized as Response A, B, C, etc.) and provided rankings.
-        Below, model names are shown in <strong>bold</strong> for readability, but the original evaluation used anonymous labels.
+        Cada modelo evaluo todas las respuestas (anonimizadas como Response A, B, C, etc.) y proporciono rankings.
+        Abajo, los nombres de los modelos se muestran en <strong>negrita</strong> para facilitar la lectura, pero la evaluacion original uso etiquetas anonimas.
       </p>
 
       <div className="tabs">
@@ -56,7 +56,7 @@ export default function Stage2({ rankings, labelToModel, aggregateRankings }) {
         {rankings[activeTab].parsed_ranking &&
          rankings[activeTab].parsed_ranking.length > 0 && (
           <div className="parsed-ranking">
-            <strong>Extracted Ranking:</strong>
+            <strong>Ranking Extraido:</strong>
             <ol>
               {rankings[activeTab].parsed_ranking.map((label, i) => (
                 <li key={i}>
@@ -72,9 +72,9 @@ export default function Stage2({ rankings, labelToModel, aggregateRankings }) {
 
       {aggregateRankings && aggregateRankings.length > 0 && (
         <div className="aggregate-rankings">
-          <h4>Aggregate Rankings (Street Cred)</h4>
+          <h4>Rankings Agregados (Credibilidad)</h4>
           <p className="stage-description">
-            Combined results across all peer evaluations (lower score is better):
+            Resultados combinados de todas las evaluaciones de pares (menor puntaje = mejor):
           </p>
           <div className="aggregate-list">
             {aggregateRankings.map((agg, index) => (
@@ -87,7 +87,7 @@ export default function Stage2({ rankings, labelToModel, aggregateRankings }) {
                   Avg: {agg.average_rank.toFixed(2)}
                 </span>
                 <span className="rank-count">
-                  ({agg.rankings_count} votes)
+                  ({agg.rankings_count} votos)
                 </span>
               </div>
             ))}
