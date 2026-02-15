@@ -1,8 +1,147 @@
-# LLM Council - Arena de Batalla de Modelos
+# LLM Council - Battle Arena for AI Models
 
 ![llmcouncil](header.jpg)
 
-> Fork personalizado del [llm-council de Karpathy](https://github.com/karpathy/llm-council) con UI tipo "arena de batalla", selector dinamico de modelos gratuitos, y respuestas 100% en espanol.
+> Custom fork of [Karpathy's llm-council](https://github.com/karpathy/llm-council) with a "battle arena" UI, dynamic free model selector, retry/fallback mechanism, and full Spanish language support.
+
+## What is this?
+
+Instead of asking a single LLM, this app sends your question to **multiple AI models simultaneously**, has them evaluate each other, and a designated "chairman" model synthesizes the best final answer.
+
+### The 3 Rounds of Battle
+
+1. **Round 1 - Individual Responses**: Your question is sent in parallel to all selected models. Responses are shown side-by-side in color-coded panels with model-specific emojis. Includes an **automatic retry mechanism** if fewer than 2 models respond (retries failed models + tries backup models).
+
+2. **Round 2 - Cross Evaluations**: Each model evaluates the others' responses (anonymized as "Response A", "Response B", etc.) and generates a ranking. An **aggregated ranking** is calculated and displayed as a podium.
+
+3. **Round 3 - Chairman's Verdict**: A designated chairman model analyzes all responses + evaluations and synthesizes a concise final answer (3-4 paragraphs max).
+
+## Differences vs the Original
+
+| Feature | Karpathy original | This fork |
+|---------|------------------|-----------|
+| Model selector | Hardcoded in config.py | **Dynamic UI** with 30+ free models |
+| Number of models | Fixed (4) | **Configurable 2-6** from frontend |
+| Chairman model | Fixed | **Selectable** separately |
+| Chairman response | Long | **Short and concise** (3-4 paragraphs) |
+| Language | English | **Full Spanish** (UI + model responses) |
+| Retry/Fallback | No | **Yes** - retries failed + backup models |
+| Model names | Hidden during loading | **Always visible** with emoji and color |
+| UI | Basic tabs | **Battle arena** with side-by-side panels, podium, live timeline |
+| Models | Paid (GPT-5, Claude, etc.) | **100% free** via OpenRouter |
+
+## Screenshots
+
+The UI features:
+- Configuration panel with quantity selector (2-6) and dropdowns per model
+- Live arena with "EN VIVO" (LIVE) badge during battle
+- Side-by-side panels with shimmer loading and real model names
+- Evaluation tabs per model with de-anonymization
+- Podium with aggregated ranking and color bars
+- Concise chairman verdict
+
+## Setup
+
+### 1. Requirements
+
+- Python 3.10+ with [uv](https://docs.astral.sh/uv/)
+- Node.js 18+
+- An [OpenRouter](https://openrouter.ai/) API key (free models require no balance)
+
+### 2. Install dependencies
+
+```bash
+# Backend (Python)
+uv sync
+
+# Frontend (React)
+cd frontend && npm install && cd ..
+```
+
+### 3. Configure API Key
+
+Create a `.env` file in the project root:
+
+```bash
+OPENROUTER_API_KEY=sk-or-v1-your-api-key-here
+```
+
+Get your free API key at [openrouter.ai/keys](https://openrouter.ai/keys).
+
+### 4. Run
+
+**Windows:**
+```bash
+start.bat
+```
+
+**Linux/Mac:**
+```bash
+./start.sh
+```
+
+**Or manually in two terminals:**
+
+```bash
+# Terminal 1 - Backend (port 8001)
+uv run python -m backend.main
+
+# Terminal 2 - Frontend (port 5173)
+cd frontend && npm run dev
+```
+
+Open http://localhost:5173 in your browser.
+
+## How to Use
+
+1. Click **"+ Nueva Conversacion"** (New Conversation)
+2. In the **"Configuracion de Batalla"** (Battle Config) panel:
+   - Choose how many models will compete (2-6)
+   - Select each model from the dropdown (30+ free options)
+   - Choose the chairman model separately
+3. Type your question and press Enter
+4. Watch the live battle unfold through all 3 rounds
+
+## Architecture
+
+```
+llm-council/
+  backend/
+    main.py          # FastAPI + SSE streaming endpoints
+    council.py       # 3-stage orchestration + retry/fallback
+    openrouter.py    # OpenRouter API client + free model fetching
+    config.py        # Default configuration
+    storage.py       # JSON persistence
+  frontend/
+    src/
+      App.jsx                    # Global state + SSE handling
+      api.js                     # API client with SSE streaming
+      components/
+        ModelSelector.jsx/css    # Model + quantity selector
+        ProcessTimeline.jsx/css  # Battle arena (panels, podium, chairman)
+        ChatInterface.jsx/css    # Main chat
+        Sidebar.jsx              # Conversation list
+```
+
+## Tech Stack
+
+- **Backend:** FastAPI, async httpx, SSE (Server-Sent Events)
+- **Frontend:** React 18 + Vite, react-markdown
+- **API:** OpenRouter (proxy for 30+ LLM providers)
+- **Storage:** JSON files in `data/conversations/`
+- **Package Management:** uv (Python), npm (JS)
+
+## Credits
+
+- Original idea: [Andrej Karpathy](https://github.com/karpathy/llm-council)
+- Fork with arena UI, dynamic selector, retry, and Spanish: [msemino](https://github.com/msemino)
+- Vibe coded with Claude Code (Opus 4.6)
+
+---
+
+# LLM Council - Arena de Batalla de Modelos (Espanol)
+
+> Fork personalizado del [llm-council de Karpathy](https://github.com/karpathy/llm-council) con UI tipo "arena de batalla", selector dinamico de modelos gratuitos, mecanismo de retry/fallback, y soporte completo en espanol.
 
 ## Que es esto?
 
@@ -30,17 +169,7 @@ En vez de preguntar a un solo LLM, esta app envia tu pregunta a **multiples mode
 | UI | Tabs basicos | **Arena de batalla** con paneles lado a lado, podio, timeline en vivo |
 | Modelos | De pago (GPT-5, Claude, etc.) | **100% gratuitos** via OpenRouter |
 
-## Screenshots
-
-La UI muestra:
-- Panel de configuracion con selector de cantidad (2-6) y dropdowns por modelo
-- Arena en vivo con badge "EN VIVO" durante la batalla
-- Paneles lado a lado con shimmer loading y nombres reales
-- Tabs de evaluacion por modelo con de-anonimizacion
-- Podio con ranking agregado y barras de colores
-- Veredicto del presidente conciso
-
-## Setup
+## Instalacion
 
 ### 1. Requisitos
 
@@ -101,35 +230,6 @@ Abrir http://localhost:5173 en el navegador.
    - Elegir el modelo presidente por separado
 3. Escribir tu pregunta y presionar Enter
 4. Ver la batalla en vivo con las 3 rondas
-
-## Arquitectura
-
-```
-llm-council/
-  backend/
-    main.py          # FastAPI + endpoints SSE streaming
-    council.py       # Orquestacion 3 etapas + retry/fallback
-    openrouter.py    # Cliente API OpenRouter + fetch modelos gratis
-    config.py        # Configuracion por defecto
-    storage.py       # Persistencia JSON
-  frontend/
-    src/
-      App.jsx                    # Estado global + manejo SSE
-      api.js                     # Cliente API con streaming SSE
-      components/
-        ModelSelector.jsx/css    # Selector de modelos + cantidad
-        ProcessTimeline.jsx/css  # Arena de batalla (paneles, podio, chairman)
-        ChatInterface.jsx/css    # Chat principal
-        Sidebar.jsx              # Lista de conversaciones
-```
-
-## Tech Stack
-
-- **Backend:** FastAPI, async httpx, SSE (Server-Sent Events)
-- **Frontend:** React 18 + Vite, react-markdown
-- **API:** OpenRouter (proxy para 30+ proveedores de LLM)
-- **Storage:** JSON files en `data/conversations/`
-- **Package Management:** uv (Python), npm (JS)
 
 ## Creditos
 
