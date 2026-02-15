@@ -4,13 +4,15 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 import uuid
 import json
 import asyncio
+import time
 
 from . import storage
 from .council import run_full_council, generate_conversation_title, stage1_collect_responses, stage2_collect_rankings, stage3_synthesize_final, calculate_aggregate_rankings
+from .openrouter import fetch_free_models
 
 app = FastAPI(title="LLM Council API")
 
@@ -23,6 +25,11 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Cache for free models list
+_free_models_cache: Optional[List[Dict[str, Any]]] = None
+_free_models_cache_time: float = 0
+FREE_MODELS_CACHE_TTL = 600  # 10 minutes in seconds
+
 
 class CreateConversationRequest(BaseModel):
     """Request to create a new conversation."""
@@ -32,6 +39,8 @@ class CreateConversationRequest(BaseModel):
 class SendMessageRequest(BaseModel):
     """Request to send a message in a conversation."""
     content: str
+    council_models: Optional[List[str]] = None
+    chairman_model: Optional[str] = None
 
 
 class ConversationMetadata(BaseModel):
@@ -54,6 +63,21 @@ class Conversation(BaseModel):
 async def root():
     """Health check endpoint."""
     return {"status": "ok", "service": "LLM Council API"}
+
+
+@app.get("/api/models/free")
+async def list_free_models():
+    """List free models available on OpenRouter. Cached for 10 minutes."""
+    global _free_models_cache, _free_models_cache_time
+
+    now = time.time()
+    if _free_models_cache is not None and (now - _free_models_cache_time) < FREE_MODELS_CACHE_TTL:
+        return _free_models_cache
+
+    models = await fetch_free_models()
+    _free_models_cache = models
+    _free_models_cache_time = now
+    return models
 
 
 @app.get("/api/conversations", response_model=List[ConversationMetadata])
@@ -103,7 +127,9 @@ async def send_message(conversation_id: str, request: SendMessageRequest):
 
     # Run the 3-stage council process
     stage1_results, stage2_results, stage3_result, metadata = await run_full_council(
-        request.content
+        request.content,
+        council_models=request.council_models,
+        chairman_model=request.chairman_model,
     )
 
     # Add assistant message with all stages
@@ -147,20 +173,35 @@ async def send_message_stream(conversation_id: str, request: SendMessageRequest)
             if is_first_message:
                 title_task = asyncio.create_task(generate_conversation_title(request.content))
 
-            # Stage 1: Collect responses
+            # Stage 1: Collect responses (with retry/fallback for minimum responses)
             yield f"data: {json.dumps({'type': 'stage1_start'})}\n\n"
-            stage1_results = await stage1_collect_responses(request.content)
+
+            # Progress callback to stream retry events to frontend
+            retry_events = []
+            async def on_stage1_progress(event_type, data):
+                retry_events.append((event_type, data))
+
+            stage1_results = await stage1_collect_responses(
+                request.content,
+                models=request.council_models,
+                on_progress=on_stage1_progress,
+            )
+
+            # Send any retry events that occurred
+            for evt_type, evt_data in retry_events:
+                yield f"data: {json.dumps({'type': evt_type, 'data': evt_data})}\n\n"
+
             yield f"data: {json.dumps({'type': 'stage1_complete', 'data': stage1_results})}\n\n"
 
             # Stage 2: Collect rankings
             yield f"data: {json.dumps({'type': 'stage2_start'})}\n\n"
-            stage2_results, label_to_model = await stage2_collect_rankings(request.content, stage1_results)
+            stage2_results, label_to_model = await stage2_collect_rankings(request.content, stage1_results, models=request.council_models)
             aggregate_rankings = calculate_aggregate_rankings(stage2_results, label_to_model)
             yield f"data: {json.dumps({'type': 'stage2_complete', 'data': stage2_results, 'metadata': {'label_to_model': label_to_model, 'aggregate_rankings': aggregate_rankings}})}\n\n"
 
             # Stage 3: Synthesize final answer
             yield f"data: {json.dumps({'type': 'stage3_start'})}\n\n"
-            stage3_result = await stage3_synthesize_final(request.content, stage1_results, stage2_results)
+            stage3_result = await stage3_synthesize_final(request.content, stage1_results, stage2_results, chairman_model=request.chairman_model)
             yield f"data: {json.dumps({'type': 'stage3_complete', 'data': stage3_result})}\n\n"
 
             # Wait for title generation if it was started

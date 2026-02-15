@@ -9,6 +9,7 @@ function App() {
   const [currentConversationId, setCurrentConversationId] = useState(null);
   const [currentConversation, setCurrentConversation] = useState(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [modelConfig, setModelConfig] = useState({});
 
   // Load conversations on mount
   useEffect(() => {
@@ -57,6 +58,10 @@ function App() {
     setCurrentConversationId(id);
   };
 
+  const handleModelConfigChange = (config) => {
+    setModelConfig(config);
+  };
+
   const handleSendMessage = async (content) => {
     if (!currentConversationId) return;
 
@@ -90,64 +95,47 @@ function App() {
       }));
 
       // Send message with streaming
+      // Helper: immutably update the last assistant message
+      const updateLastMsg = (updater) => {
+        setCurrentConversation((prev) => {
+          const messages = prev.messages.slice(0, -1);
+          const last = prev.messages[prev.messages.length - 1];
+          const updated = { ...last, loading: { ...last.loading }, ...updater(last) };
+          return { ...prev, messages: [...messages, updated] };
+        });
+      };
+
       await api.sendMessageStream(currentConversationId, content, (eventType, event) => {
         switch (eventType) {
           case 'stage1_start':
-            setCurrentConversation((prev) => {
-              const messages = [...prev.messages];
-              const lastMsg = messages[messages.length - 1];
-              lastMsg.loading.stage1 = true;
-              return { ...prev, messages };
-            });
+            updateLastMsg((m) => ({
+              selectedModels: modelConfig.council_models || [],
+              loading: { ...m.loading, stage1: true },
+            }));
+            break;
+
+          case 'stage1_retry':
+            updateLastMsg(() => ({ retryInfo: event.data }));
             break;
 
           case 'stage1_complete':
-            setCurrentConversation((prev) => {
-              const messages = [...prev.messages];
-              const lastMsg = messages[messages.length - 1];
-              lastMsg.stage1 = event.data;
-              lastMsg.loading.stage1 = false;
-              return { ...prev, messages };
-            });
+            updateLastMsg((m) => ({ stage1: event.data, retryInfo: null, loading: { ...m.loading, stage1: false } }));
             break;
 
           case 'stage2_start':
-            setCurrentConversation((prev) => {
-              const messages = [...prev.messages];
-              const lastMsg = messages[messages.length - 1];
-              lastMsg.loading.stage2 = true;
-              return { ...prev, messages };
-            });
+            updateLastMsg((m) => ({ loading: { ...m.loading, stage2: true } }));
             break;
 
           case 'stage2_complete':
-            setCurrentConversation((prev) => {
-              const messages = [...prev.messages];
-              const lastMsg = messages[messages.length - 1];
-              lastMsg.stage2 = event.data;
-              lastMsg.metadata = event.metadata;
-              lastMsg.loading.stage2 = false;
-              return { ...prev, messages };
-            });
+            updateLastMsg((m) => ({ stage2: event.data, metadata: event.metadata, loading: { ...m.loading, stage2: false } }));
             break;
 
           case 'stage3_start':
-            setCurrentConversation((prev) => {
-              const messages = [...prev.messages];
-              const lastMsg = messages[messages.length - 1];
-              lastMsg.loading.stage3 = true;
-              return { ...prev, messages };
-            });
+            updateLastMsg((m) => ({ loading: { ...m.loading, stage3: true } }));
             break;
 
           case 'stage3_complete':
-            setCurrentConversation((prev) => {
-              const messages = [...prev.messages];
-              const lastMsg = messages[messages.length - 1];
-              lastMsg.stage3 = event.data;
-              lastMsg.loading.stage3 = false;
-              return { ...prev, messages };
-            });
+            updateLastMsg((m) => ({ stage3: event.data, loading: { ...m.loading, stage3: false } }));
             break;
 
           case 'title_complete':
@@ -169,7 +157,7 @@ function App() {
           default:
             console.log('Unknown event type:', eventType);
         }
-      });
+      }, modelConfig);
     } catch (error) {
       console.error('Failed to send message:', error);
       // Remove optimistic messages on error
@@ -193,6 +181,7 @@ function App() {
         conversation={currentConversation}
         onSendMessage={handleSendMessage}
         isLoading={isLoading}
+        onModelConfigChange={handleModelConfigChange}
       />
     </div>
   );

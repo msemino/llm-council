@@ -1,40 +1,136 @@
 """3-stage LLM Council orchestration."""
 
-from typing import List, Dict, Any, Tuple
-from .openrouter import query_models_parallel, query_model
+from typing import List, Dict, Any, Tuple, Optional, Callable
+from .openrouter import query_models_parallel, query_model, fetch_free_models
 from .config import COUNCIL_MODELS, CHAIRMAN_MODEL
 
+# Minimum number of successful responses required for a meaningful battle
+MIN_RESPONSES = 2
+# Max retry rounds before giving up
+MAX_RETRY_ROUNDS = 2
 
-async def stage1_collect_responses(user_query: str) -> List[Dict[str, Any]]:
+# Reliable backup models to try when primary models fail
+BACKUP_MODELS = [
+    "google/gemma-3-12b-it:free",
+    "google/gemma-3-4b-it:free",
+    "mistralai/mistral-small-3.1-24b-instruct:free",
+    "microsoft/phi-4-reasoning-plus:free",
+    "nvidia/llama-3.1-nemotron-70b-instruct:free",
+    "deepseek/deepseek-r1-0528:free",
+    "qwen/qwen3-235b-a22b-thinking-2507",
+]
+
+
+async def stage1_collect_responses(
+    user_query: str,
+    models: Optional[List[str]] = None,
+    on_progress: Optional[Callable] = None,
+) -> List[Dict[str, Any]]:
     """
     Stage 1: Collect individual responses from all council models.
+    Includes retry and fallback mechanism to ensure at least MIN_RESPONSES models respond.
 
     Args:
         user_query: The user's question
+        models: Optional list of model identifiers to use instead of config defaults
+        on_progress: Optional async callback for progress events (type, data)
 
     Returns:
         List of dicts with 'model' and 'response' keys
     """
-    messages = [{"role": "user", "content": user_query}]
+    active_models = models if models is not None else COUNCIL_MODELS
+    system_msg = {"role": "system", "content": "IMPORTANTE: Siempre responde en español. Toda tu respuesta debe estar completamente en idioma español sin excepción. No uses otros idiomas."}
+    messages = [system_msg, {"role": "user", "content": user_query}]
 
     # Query all models in parallel
-    responses = await query_models_parallel(COUNCIL_MODELS, messages)
+    responses = await query_models_parallel(active_models, messages)
 
     # Format results
     stage1_results = []
+    succeeded_models = set()
+    failed_models = []
     for model, response in responses.items():
-        if response is not None:  # Only include successful responses
+        if response is not None and response.get('content'):
             stage1_results.append({
                 "model": model,
                 "response": response.get('content', '')
             })
+            succeeded_models.add(model)
+        else:
+            failed_models.append(model)
+
+    # --- RETRY & FALLBACK MECHANISM ---
+    retry_round = 0
+    while len(stage1_results) < MIN_RESPONSES and retry_round < MAX_RETRY_ROUNDS:
+        retry_round += 1
+        need = MIN_RESPONSES - len(stage1_results)
+
+        if on_progress:
+            await on_progress("stage1_retry", {
+                "round": retry_round,
+                "successful": len(stage1_results),
+                "needed": need,
+                "retrying": failed_models[:need] if failed_models else [],
+            })
+
+        # Round 1: retry the failed models once
+        if retry_round == 1 and failed_models:
+            retry_targets = failed_models[:need + 1]  # try a couple extra
+            print(f"[Retry round {retry_round}] Retrying {len(retry_targets)} failed models: {retry_targets}")
+            retry_responses = await query_models_parallel(retry_targets, messages)
+            for model, response in retry_responses.items():
+                if response is not None and response.get('content') and model not in succeeded_models:
+                    stage1_results.append({
+                        "model": model,
+                        "response": response.get('content', '')
+                    })
+                    succeeded_models.add(model)
+            # Update failed models list
+            failed_models = [m for m in failed_models if m not in succeeded_models]
+
+        # Round 2: bring in backup models
+        if len(stage1_results) < MIN_RESPONSES and retry_round >= 1:
+            # Pick backup models not already tried
+            all_tried = succeeded_models | set(active_models)
+            candidates = [m for m in BACKUP_MODELS if m not in all_tried]
+
+            if not candidates:
+                # If all backups already tried, break out
+                break
+
+            need = MIN_RESPONSES - len(stage1_results)
+            backup_targets = candidates[:need + 2]  # try extras for safety
+            print(f"[Retry round {retry_round}] Trying {len(backup_targets)} backup models: {backup_targets}")
+
+            if on_progress:
+                await on_progress("stage1_retry", {
+                    "round": retry_round,
+                    "successful": len(stage1_results),
+                    "needed": need,
+                    "retrying": backup_targets,
+                    "backup": True,
+                })
+
+            backup_responses = await query_models_parallel(backup_targets, messages)
+            for model, response in backup_responses.items():
+                if response is not None and response.get('content') and model not in succeeded_models:
+                    stage1_results.append({
+                        "model": model,
+                        "response": response.get('content', '')
+                    })
+                    succeeded_models.add(model)
+            all_tried.update(backup_targets)
+
+    if len(stage1_results) < MIN_RESPONSES:
+        print(f"[WARNING] Only got {len(stage1_results)} responses after {retry_round} retry rounds")
 
     return stage1_results
 
 
 async def stage2_collect_rankings(
     user_query: str,
-    stage1_results: List[Dict[str, Any]]
+    stage1_results: List[Dict[str, Any]],
+    models: Optional[List[str]] = None,
 ) -> Tuple[List[Dict[str, Any]], Dict[str, str]]:
     """
     Stage 2: Each model ranks the anonymized responses.
@@ -42,10 +138,13 @@ async def stage2_collect_rankings(
     Args:
         user_query: The original user query
         stage1_results: Results from Stage 1
+        models: Optional list of model identifiers to use instead of config defaults
 
     Returns:
         Tuple of (rankings list, label_to_model mapping)
     """
+    active_models = models if models is not None else COUNCIL_MODELS
+
     # Create anonymized labels for responses (Response A, Response B, etc.)
     labels = [chr(65 + i) for i in range(len(stage1_results))]  # A, B, C, ...
 
@@ -61,41 +160,41 @@ async def stage2_collect_rankings(
         for label, result in zip(labels, stage1_results)
     ])
 
-    ranking_prompt = f"""You are evaluating different responses to the following question:
+    ranking_prompt = f"""Estás evaluando diferentes respuestas a la siguiente pregunta:
 
-Question: {user_query}
+Pregunta: {user_query}
 
-Here are the responses from different models (anonymized):
+Aquí están las respuestas de diferentes modelos (anonimizadas):
 
 {responses_text}
 
-Your task:
-1. First, evaluate each response individually. For each response, explain what it does well and what it does poorly.
-2. Then, at the very end of your response, provide a final ranking.
+Tu tarea (RESPONDE TODO EN ESPAÑOL):
+1. Primero, evalúa cada respuesta individualmente. Para cada una, explica qué hace bien y qué hace mal.
+2. Luego, al final de tu respuesta, proporciona un ranking final.
 
-IMPORTANT: Your final ranking MUST be formatted EXACTLY as follows:
-- Start with the line "FINAL RANKING:" (all caps, with colon)
-- Then list the responses from best to worst as a numbered list
-- Each line should be: number, period, space, then ONLY the response label (e.g., "1. Response A")
-- Do not add any other text or explanations in the ranking section
+IMPORTANTE: Tu ranking final DEBE estar formateado EXACTAMENTE así:
+- Comienza con la línea "FINAL RANKING:" (todo en mayúsculas, con dos puntos)
+- Luego lista las respuestas de mejor a peor como lista numerada
+- Cada línea debe ser: número, punto, espacio, y SOLO la etiqueta de respuesta (ej: "1. Response A")
+- No agregues ningún otro texto o explicación en la sección del ranking
 
-Example of the correct format for your ENTIRE response:
+Ejemplo del formato correcto para tu respuesta COMPLETA:
 
-Response A provides good detail on X but misses Y...
-Response B is accurate but lacks depth on Z...
-Response C offers the most comprehensive answer...
+Response A proporciona buen detalle sobre X pero falla en Y...
+Response B es precisa pero le falta profundidad en Z...
+Response C ofrece la respuesta más completa...
 
 FINAL RANKING:
 1. Response C
 2. Response A
 3. Response B
 
-Now provide your evaluation and ranking:"""
+Ahora proporciona tu evaluación y ranking (EN ESPAÑOL):"""
 
-    messages = [{"role": "user", "content": ranking_prompt}]
+    messages = [{"role": "system", "content": "IMPORTANTE: Responde siempre en español. Toda tu evaluación debe estar en español."}, {"role": "user", "content": ranking_prompt}]
 
     # Get rankings from all council models in parallel
-    responses = await query_models_parallel(COUNCIL_MODELS, messages)
+    responses = await query_models_parallel(active_models, messages)
 
     # Format results
     stage2_results = []
@@ -115,7 +214,8 @@ Now provide your evaluation and ranking:"""
 async def stage3_synthesize_final(
     user_query: str,
     stage1_results: List[Dict[str, Any]],
-    stage2_results: List[Dict[str, Any]]
+    stage2_results: List[Dict[str, Any]],
+    chairman_model: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Stage 3: Chairman synthesizes final response.
@@ -124,10 +224,13 @@ async def stage3_synthesize_final(
         user_query: The original user query
         stage1_results: Individual model responses from Stage 1
         stage2_results: Rankings from Stage 2
+        chairman_model: Optional model identifier to use instead of config default
 
     Returns:
         Dict with 'model' and 'response' keys
     """
+    active_chairman = chairman_model if chairman_model is not None else CHAIRMAN_MODEL
+
     # Build comprehensive context for chairman
     stage1_text = "\n\n".join([
         f"Model: {result['model']}\nResponse: {result['response']}"
@@ -139,37 +242,38 @@ async def stage3_synthesize_final(
         for result in stage2_results
     ])
 
-    chairman_prompt = f"""You are the Chairman of an LLM Council. Multiple AI models have provided responses to a user's question, and then ranked each other's responses.
+    chairman_prompt = f"""Eres el Presidente del Consejo de LLMs. Varios modelos respondieron a la pregunta de un usuario y luego evaluaron las respuestas entre sí.
 
-Original Question: {user_query}
+Pregunta Original: {user_query}
 
-STAGE 1 - Individual Responses:
+ETAPA 1 - Respuestas Individuales:
 {stage1_text}
 
-STAGE 2 - Peer Rankings:
+ETAPA 2 - Rankings de Pares:
 {stage2_text}
 
-Your task as Chairman is to synthesize all of this information into a single, comprehensive, accurate answer to the user's original question. Consider:
-- The individual responses and their insights
-- The peer rankings and what they reveal about response quality
-- Any patterns of agreement or disagreement
+INSTRUCCIONES ESTRICTAS:
+- Tu respuesta DEBE ser CORTA y CONCISA: máximo 3-4 párrafos.
+- Ve directo al punto. No repitas ni resumas cada respuesta individual.
+- No incluyas análisis extensos de cada modelo ni de los rankings.
+- Sintetiza la mejor respuesta posible a la pregunta original, tomando lo mejor de las respuestas mejor rankeadas.
+- Escribe como si respondieras directamente al usuario, no como un informe académico.
+- RESPONDE COMPLETAMENTE EN ESPAÑOL."""
 
-Provide a clear, well-reasoned final answer that represents the council's collective wisdom:"""
-
-    messages = [{"role": "user", "content": chairman_prompt}]
+    messages = [{"role": "system", "content": "IMPORTANTE: Responde siempre en español. Sé breve y directo. Máximo 3-4 párrafos."}, {"role": "user", "content": chairman_prompt}]
 
     # Query the chairman model
-    response = await query_model(CHAIRMAN_MODEL, messages)
+    response = await query_model(active_chairman, messages)
 
     if response is None:
         # Fallback if chairman fails
         return {
-            "model": CHAIRMAN_MODEL,
+            "model": active_chairman,
             "response": "Error: Unable to generate final synthesis."
         }
 
     return {
-        "model": CHAIRMAN_MODEL,
+        "model": active_chairman,
         "response": response.get('content', '')
     }
 
@@ -293,18 +397,24 @@ Title:"""
     return title
 
 
-async def run_full_council(user_query: str) -> Tuple[List, List, Dict, Dict]:
+async def run_full_council(
+    user_query: str,
+    council_models: Optional[List[str]] = None,
+    chairman_model: Optional[str] = None,
+) -> Tuple[List, List, Dict, Dict]:
     """
     Run the complete 3-stage council process.
 
     Args:
         user_query: The user's question
+        council_models: Optional list of model identifiers for stages 1 & 2
+        chairman_model: Optional model identifier for stage 3
 
     Returns:
         Tuple of (stage1_results, stage2_results, stage3_result, metadata)
     """
     # Stage 1: Collect individual responses
-    stage1_results = await stage1_collect_responses(user_query)
+    stage1_results = await stage1_collect_responses(user_query, models=council_models)
 
     # If no models responded successfully, return error
     if not stage1_results:
@@ -314,7 +424,7 @@ async def run_full_council(user_query: str) -> Tuple[List, List, Dict, Dict]:
         }, {}
 
     # Stage 2: Collect rankings
-    stage2_results, label_to_model = await stage2_collect_rankings(user_query, stage1_results)
+    stage2_results, label_to_model = await stage2_collect_rankings(user_query, stage1_results, models=council_models)
 
     # Calculate aggregate rankings
     aggregate_rankings = calculate_aggregate_rankings(stage2_results, label_to_model)
@@ -323,7 +433,8 @@ async def run_full_council(user_query: str) -> Tuple[List, List, Dict, Dict]:
     stage3_result = await stage3_synthesize_final(
         user_query,
         stage1_results,
-        stage2_results
+        stage2_results,
+        chairman_model=chairman_model,
     )
 
     # Prepare metadata
