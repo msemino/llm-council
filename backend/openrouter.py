@@ -19,7 +19,8 @@ async def query_model(
         timeout: Request timeout in seconds
 
     Returns:
-        Response dict with 'content' and optional 'reasoning_details', or None if failed
+        Response dict with 'content' and optional 'reasoning_details', or None if failed.
+        On failure, returns dict with 'error' and 'error_type' keys instead of None.
     """
     headers = {
         "Authorization": f"Bearer {OPENROUTER_API_KEY}",
@@ -41,6 +42,19 @@ async def query_model(
             response.raise_for_status()
 
             data = response.json()
+
+            # Check for OpenRouter error in response body
+            if 'error' in data:
+                err_msg = data['error'].get('message', str(data['error']))
+                err_code = data['error'].get('code', 0)
+                print(f"[API Error] {model}: {err_msg} (code: {err_code})")
+                error_type = 'rate_limit' if err_code == 429 else 'api_error'
+                return {'error': err_msg, 'error_type': error_type, 'content': None}
+
+            if not data.get('choices'):
+                print(f"[Empty Response] {model}: no choices returned")
+                return {'error': 'Empty response (no choices)', 'error_type': 'empty_response', 'content': None}
+
             message = data['choices'][0]['message']
 
             return {
@@ -48,9 +62,24 @@ async def query_model(
                 'reasoning_details': message.get('reasoning_details')
             }
 
+    except httpx.TimeoutException:
+        print(f"[Timeout] {model}: request timed out after {timeout}s")
+        return {'error': f'Timeout ({timeout}s)', 'error_type': 'timeout', 'content': None}
+
+    except httpx.HTTPStatusError as e:
+        status = e.response.status_code
+        error_type = 'rate_limit' if status == 429 else 'http_error'
+        body = ''
+        try:
+            body = e.response.json().get('error', {}).get('message', '')
+        except Exception:
+            body = e.response.text[:200]
+        print(f"[HTTP {status}] {model}: {body}")
+        return {'error': f'HTTP {status}: {body}', 'error_type': error_type, 'content': None}
+
     except Exception as e:
-        print(f"Error querying model {model}: {e}")
-        return None
+        print(f"[Error] {model}: {e}")
+        return {'error': str(e), 'error_type': 'unknown', 'content': None}
 
 
 async def query_models_parallel(

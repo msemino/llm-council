@@ -49,6 +49,7 @@ async def stage1_collect_responses(
     stage1_results = []
     succeeded_models = set()
     failed_models = []
+    failed_details = {}  # model -> error info
     for model, response in responses.items():
         if response is not None and response.get('content'):
             stage1_results.append({
@@ -58,6 +59,16 @@ async def stage1_collect_responses(
             succeeded_models.add(model)
         else:
             failed_models.append(model)
+            if response and response.get('error'):
+                failed_details[model] = {
+                    'error': response['error'],
+                    'error_type': response.get('error_type', 'unknown')
+                }
+            else:
+                failed_details[model] = {
+                    'error': 'No response received',
+                    'error_type': 'no_response'
+                }
 
     # --- RETRY & FALLBACK MECHANISM ---
     retry_round = 0
@@ -71,6 +82,7 @@ async def stage1_collect_responses(
                 "successful": len(stage1_results),
                 "needed": need,
                 "retrying": failed_models[:need] if failed_models else [],
+                "failures": failed_details,
             })
 
         # Round 1: retry the failed models once
@@ -124,6 +136,21 @@ async def stage1_collect_responses(
     if len(stage1_results) < MIN_RESPONSES:
         print(f"[WARNING] Only got {len(stage1_results)} responses after {retry_round} retry rounds")
 
+    # Attach failure details to results for frontend display
+    for r in stage1_results:
+        r.setdefault('status', 'success')
+
+    # Add failed models as entries so frontend knows what failed
+    for model in failed_models:
+        detail = failed_details.get(model, {})
+        stage1_results.append({
+            "model": model,
+            "response": None,
+            "status": "failed",
+            "error": detail.get('error', 'Unknown error'),
+            "error_type": detail.get('error_type', 'unknown'),
+        })
+
     return stage1_results
 
 
@@ -137,7 +164,7 @@ async def stage2_collect_rankings(
 
     Args:
         user_query: The original user query
-        stage1_results: Results from Stage 1
+        stage1_results: Results from Stage 1 (may include failed entries)
         models: Optional list of model identifiers to use instead of config defaults
 
     Returns:
@@ -145,19 +172,22 @@ async def stage2_collect_rankings(
     """
     active_models = models if models is not None else COUNCIL_MODELS
 
+    # Filter out failed entries - only use successful responses for ranking
+    successful_results = [r for r in stage1_results if r.get('status') != 'failed' and r.get('response')]
+
     # Create anonymized labels for responses (Response A, Response B, etc.)
-    labels = [chr(65 + i) for i in range(len(stage1_results))]  # A, B, C, ...
+    labels = [chr(65 + i) for i in range(len(successful_results))]  # A, B, C, ...
 
     # Create mapping from label to model name
     label_to_model = {
         f"Response {label}": result['model']
-        for label, result in zip(labels, stage1_results)
+        for label, result in zip(labels, successful_results)
     }
 
     # Build the ranking prompt
     responses_text = "\n\n".join([
         f"Response {label}:\n{result['response']}"
-        for label, result in zip(labels, stage1_results)
+        for label, result in zip(labels, successful_results)
     ])
 
     ranking_prompt = f"""Estás evaluando diferentes respuestas a la siguiente pregunta:
@@ -199,7 +229,7 @@ Ahora proporciona tu evaluación y ranking (EN ESPAÑOL):"""
     # Format results
     stage2_results = []
     for model, response in responses.items():
-        if response is not None:
+        if response is not None and response.get('content'):
             full_text = response.get('content', '')
             parsed = parse_ranking_from_text(full_text)
             stage2_results.append({
@@ -216,25 +246,31 @@ async def stage3_synthesize_final(
     stage1_results: List[Dict[str, Any]],
     stage2_results: List[Dict[str, Any]],
     chairman_model: Optional[str] = None,
+    on_progress: Optional[Callable] = None,
 ) -> Dict[str, Any]:
     """
     Stage 3: Chairman synthesizes final response.
+    Includes retry with the same model + fallback to backup models if chairman fails.
 
     Args:
         user_query: The original user query
-        stage1_results: Individual model responses from Stage 1
+        stage1_results: Individual model responses from Stage 1 (may include failed entries)
         stage2_results: Rankings from Stage 2
         chairman_model: Optional model identifier to use instead of config default
+        on_progress: Optional async callback for progress events
 
     Returns:
-        Dict with 'model' and 'response' keys
+        Dict with 'model', 'response' keys, and optionally 'status', 'error', 'error_type', 'attempts'
     """
     active_chairman = chairman_model if chairman_model is not None else CHAIRMAN_MODEL
+
+    # Filter out failed entries - only use successful responses for synthesis
+    successful_results = [r for r in stage1_results if r.get('status') != 'failed' and r.get('response')]
 
     # Build comprehensive context for chairman
     stage1_text = "\n\n".join([
         f"Model: {result['model']}\nResponse: {result['response']}"
-        for result in stage1_results
+        for result in successful_results
     ])
 
     stage2_text = "\n\n".join([
@@ -262,19 +298,117 @@ INSTRUCCIONES ESTRICTAS:
 
     messages = [{"role": "system", "content": "IMPORTANTE: Responde siempre en español. Sé breve y directo. Máximo 3-4 párrafos."}, {"role": "user", "content": chairman_prompt}]
 
-    # Query the chairman model
+    # --- CHAIRMAN RETRY & FALLBACK ---
+    attempts = []
+
+    # Attempt 1: Try the selected chairman model
+    print(f"[Chairman] Attempting with primary: {active_chairman}")
     response = await query_model(active_chairman, messages)
 
-    if response is None:
-        # Fallback if chairman fails
+    if response and response.get('content'):
         return {
             "model": active_chairman,
-            "response": "Error: Unable to generate final synthesis."
+            "response": response.get('content', ''),
+            "status": "success",
+            "attempts": [{"model": active_chairman, "status": "success"}],
         }
 
+    # Record failure
+    error_info = {
+        "model": active_chairman,
+        "status": "failed",
+        "error": response.get('error', 'Unknown error') if response else 'No response',
+        "error_type": response.get('error_type', 'unknown') if response else 'no_response',
+    }
+    attempts.append(error_info)
+    print(f"[Chairman] Primary failed: {error_info['error']} ({error_info['error_type']})")
+
+    if on_progress:
+        await on_progress("stage3_retry", {
+            "attempt": 1,
+            "failed_model": active_chairman,
+            "error": error_info['error'],
+            "error_type": error_info['error_type'],
+        })
+
+    # Attempt 2: Retry the same chairman once more
+    print(f"[Chairman] Retry attempt with: {active_chairman}")
+    response = await query_model(active_chairman, messages)
+
+    if response and response.get('content'):
+        attempts.append({"model": active_chairman, "status": "success"})
+        return {
+            "model": active_chairman,
+            "response": response.get('content', ''),
+            "status": "success",
+            "attempts": attempts,
+        }
+
+    # Record second failure
+    error_info2 = {
+        "model": active_chairman,
+        "status": "failed",
+        "error": response.get('error', 'Unknown error') if response else 'No response',
+        "error_type": response.get('error_type', 'unknown') if response else 'no_response',
+    }
+    attempts.append(error_info2)
+    print(f"[Chairman] Retry failed: {error_info2['error']}")
+
+    if on_progress:
+        await on_progress("stage3_retry", {
+            "attempt": 2,
+            "failed_model": active_chairman,
+            "error": error_info2['error'],
+            "error_type": error_info2['error_type'],
+            "trying_backup": True,
+        })
+
+    # Attempt 3+: Try backup models
+    tried = {active_chairman}
+    for backup_model in BACKUP_MODELS:
+        if backup_model in tried:
+            continue
+        tried.add(backup_model)
+
+        print(f"[Chairman] Trying backup: {backup_model}")
+        if on_progress:
+            await on_progress("stage3_retry", {
+                "attempt": len(attempts) + 1,
+                "backup_model": backup_model,
+                "trying_backup": True,
+            })
+
+        response = await query_model(backup_model, messages)
+
+        if response and response.get('content'):
+            attempts.append({"model": backup_model, "status": "success"})
+            return {
+                "model": backup_model,
+                "response": response.get('content', ''),
+                "status": "success",
+                "original_chairman": active_chairman,
+                "attempts": attempts,
+            }
+
+        # Record backup failure
+        backup_error = {
+            "model": backup_model,
+            "status": "failed",
+            "error": response.get('error', 'Unknown error') if response else 'No response',
+            "error_type": response.get('error_type', 'unknown') if response else 'no_response',
+        }
+        attempts.append(backup_error)
+        print(f"[Chairman] Backup {backup_model} failed: {backup_error['error']}")
+
+    # All attempts failed
+    last_error = attempts[-1] if attempts else {"error": "All models failed", "error_type": "all_failed"}
     return {
         "model": active_chairman,
-        "response": response.get('content', '')
+        "response": None,
+        "status": "failed",
+        "error": last_error.get('error', 'All chairman models failed'),
+        "error_type": last_error.get('error_type', 'all_failed'),
+        "attempts": attempts,
     }
 
 
@@ -381,7 +515,7 @@ Title:"""
     # Use gemini-2.5-flash for title generation (fast and cheap)
     response = await query_model("google/gemini-2.5-flash", messages, timeout=30.0)
 
-    if response is None:
+    if response is None or not response.get('content'):
         # Fallback to a generic title
         return "New Conversation"
 
@@ -416,11 +550,15 @@ async def run_full_council(
     # Stage 1: Collect individual responses
     stage1_results = await stage1_collect_responses(user_query, models=council_models)
 
-    # If no models responded successfully, return error
-    if not stage1_results:
-        return [], [], {
+    # Check if we have any successful responses
+    successful_results = [r for r in stage1_results if r.get('status') != 'failed' and r.get('response')]
+    if not successful_results:
+        return stage1_results, [], {
             "model": "error",
-            "response": "All models failed to respond. Please try again."
+            "response": None,
+            "status": "failed",
+            "error": "All models failed to respond. Please try again.",
+            "error_type": "all_failed",
         }, {}
 
     # Stage 2: Collect rankings

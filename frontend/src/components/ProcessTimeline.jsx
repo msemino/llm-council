@@ -33,6 +33,20 @@ function shortName(model) {
   return model.split('/')[1]?.replace(':free', '').replace('-thinking-2507', '') || model;
 }
 
+function getErrorLabel(errorType) {
+  const labels = {
+    'timeout': '⏱️ Timeout',
+    'rate_limit': '🚫 Rate Limit',
+    'http_error': '🌐 HTTP Error',
+    'api_error': '⚙️ API Error',
+    'empty_response': '📭 Sin Respuesta',
+    'no_response': '📭 Sin Respuesta',
+    'all_failed': '💀 Todos Fallaron',
+    'unknown': '❓ Error Desconocido',
+  };
+  return labels[errorType] || labels['unknown'];
+}
+
 function deAnonymize(text, labelToModel) {
   if (!labelToModel || !text) return text;
   let result = text;
@@ -74,7 +88,8 @@ export default function ProcessTimeline({ message, isLoading }) {
   const labelToModel = message.metadata?.label_to_model;
   const aggRank = message.metadata?.aggregate_rankings;
   const retryInfo = message.retryInfo;
-  const models = s1 ? s1.map(r => r.model) : [];
+  const s3RetryInfo = message.stage3RetryInfo;
+  const models = s1 ? s1.filter(r => r.status !== 'failed').map(r => r.model) : [];
   const selectedModels = message.selectedModels || [];
   const placeholderModels = selectedModels.length > 0 ? selectedModels : ['deepseek', 'llama', 'gemma', 'qwen'];
 
@@ -117,20 +132,22 @@ export default function ProcessTimeline({ message, isLoading }) {
               const model = isPlaceholder ? placeholderModels[i] : item.model;
               const meta = getMeta(model);
               const resp = isPlaceholder ? null : item.response;
+              const isFailed = !isPlaceholder && item.status === 'failed';
 
               return (
                 <div
                   key={`${model}-${i}`}
-                  className={`panel ${isPlaceholder ? 'thinking' : 'done'}`}
-                  style={{ borderColor: meta.border, background: meta.bg }}
+                  className={`panel ${isPlaceholder ? 'thinking' : isFailed ? 'failed' : 'done'}`}
+                  style={{ borderColor: isFailed ? 'rgba(239,68,68,0.5)' : meta.border, background: isFailed ? 'rgba(239,68,68,0.06)' : meta.bg }}
                 >
-                  <div className="panel-head" style={{ borderBottomColor: meta.border }}>
-                    <span className="panel-emoji">{meta.emoji}</span>
-                    <span className="panel-name" style={{ color: meta.color }}>
+                  <div className="panel-head" style={{ borderBottomColor: isFailed ? 'rgba(239,68,68,0.3)' : meta.border }}>
+                    <span className="panel-emoji">{isFailed ? '❌' : meta.emoji}</span>
+                    <span className="panel-name" style={{ color: isFailed ? '#ef4444' : meta.color }}>
                       {shortName(model)}
                     </span>
                     {isPlaceholder && <span className="panel-dots">pensando<span className="dots-anim" /></span>}
-                    {!isPlaceholder && <span className="panel-wc">{resp?.split(/\s+/).length || 0} palabras</span>}
+                    {isFailed && <span className="panel-error-badge">{getErrorLabel(item.error_type)}</span>}
+                    {!isPlaceholder && !isFailed && <span className="panel-wc">{resp?.split(/\s+/).length || 0} palabras</span>}
                   </div>
                   <div className="panel-body">
                     {isPlaceholder ? (
@@ -138,6 +155,12 @@ export default function ProcessTimeline({ message, isLoading }) {
                         <div className="shimmer-line w80" /><div className="shimmer-line w60" />
                         <div className="shimmer-line w90" /><div className="shimmer-line w40" />
                         <div className="shimmer-line w70" />
+                      </div>
+                    ) : isFailed ? (
+                      <div className="panel-fail">
+                        <div className="panel-fail-icon">⚠️</div>
+                        <div className="panel-fail-type">{getErrorLabel(item.error_type)}</div>
+                        <div className="panel-fail-detail">{item.error || 'Error desconocido'}</div>
                       </div>
                     ) : (
                       <div className="panel-md markdown-content">
@@ -288,12 +311,48 @@ export default function ProcessTimeline({ message, isLoading }) {
           </div>
 
           {ld.stage3 && !s3 ? (
-            <div className="chairman-wait">
-              <div className="chairman-icon">⚖️</div>
+            <div className={`chairman-wait ${s3RetryInfo ? 'retrying' : ''}`}>
+              <div className="chairman-icon">{s3RetryInfo ? '🔄' : '⚖️'}</div>
               <div>
-                <div className="chairman-msg">El Presidente analiza todas las respuestas y evaluaciones...</div>
-                <div className="chairman-sub">Sintetizando el veredicto final del consejo</div>
+                <div className="chairman-msg">
+                  {s3RetryInfo?.trying_backup
+                    ? `Probando modelo de respaldo: ${shortName(s3RetryInfo.backup_model || s3RetryInfo.failed_model || '')}...`
+                    : s3RetryInfo
+                      ? `Reintentando presidente (${shortName(s3RetryInfo.failed_model || '')} falló: ${getErrorLabel(s3RetryInfo.error_type)})...`
+                      : 'El Presidente analiza todas las respuestas y evaluaciones...'}
+                </div>
+                <div className="chairman-sub">
+                  {s3RetryInfo
+                    ? `Intento ${s3RetryInfo.attempt || 1} — ${s3RetryInfo.error || 'reintentando'}`
+                    : 'Sintetizando el veredicto final del consejo'}
+                </div>
                 <div className="chairman-bar"><div className="chairman-fill" /></div>
+              </div>
+            </div>
+          ) : s3 && s3.status === 'failed' ? (
+            <div className="chairman-result chairman-error">
+              <div className="chairman-head">
+                <span className="chairman-icon-sm">❌</span>
+                Presidente: <strong>{shortName(s3.model)}</strong> — <span className="chairman-fail-badge">{getErrorLabel(s3.error_type)}</span>
+              </div>
+              <div className="chairman-fail-body">
+                <div className="chairman-fail-msg">
+                  <span className="chairman-fail-icon">⚠️</span>
+                  El presidente no pudo generar el veredicto final.
+                </div>
+                <div className="chairman-fail-detail">{s3.error}</div>
+                {s3.attempts && s3.attempts.length > 1 && (
+                  <div className="chairman-attempts">
+                    <strong>Intentos realizados ({s3.attempts.length}):</strong>
+                    <ul>
+                      {s3.attempts.map((att, j) => (
+                        <li key={j} className={att.status === 'success' ? 'attempt-ok' : 'attempt-fail'}>
+                          {getMeta(att.model).emoji} {shortName(att.model)}: {att.status === 'success' ? '✓ Exitoso' : `✗ ${att.error || 'Falló'}`}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
               </div>
             </div>
           ) : s3 && (
@@ -301,6 +360,12 @@ export default function ProcessTimeline({ message, isLoading }) {
               <div className="chairman-head">
                 <span className="chairman-icon-sm">⚖️</span>
                 Presidente: <strong>{shortName(s3.model)}</strong>
+                {s3.original_chairman && s3.original_chairman !== s3.model && (
+                  <span className="chairman-backup-note"> (respaldo — {shortName(s3.original_chairman)} falló)</span>
+                )}
+                {s3.attempts && s3.attempts.length > 1 && (
+                  <span className="chairman-retry-note"> — {s3.attempts.length - 1} reintento(s)</span>
+                )}
               </div>
               <div className="chairman-body markdown-content">
                 <ReactMarkdown>{s3.response}</ReactMarkdown>
