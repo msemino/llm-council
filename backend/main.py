@@ -199,9 +199,24 @@ async def send_message_stream(conversation_id: str, request: SendMessageRequest)
             aggregate_rankings = calculate_aggregate_rankings(stage2_results, label_to_model)
             yield f"data: {json.dumps({'type': 'stage2_complete', 'data': stage2_results, 'metadata': {'label_to_model': label_to_model, 'aggregate_rankings': aggregate_rankings}})}\n\n"
 
-            # Stage 3: Synthesize final answer
+            # Stage 3: Synthesize final answer (with retry/fallback)
             yield f"data: {json.dumps({'type': 'stage3_start'})}\n\n"
-            stage3_result = await stage3_synthesize_final(request.content, stage1_results, stage2_results, chairman_model=request.chairman_model)
+
+            # Progress callback to stream stage3 retry events to frontend
+            stage3_retry_events = []
+            async def on_stage3_progress(event_type, data):
+                stage3_retry_events.append((event_type, data))
+
+            stage3_result = await stage3_synthesize_final(
+                request.content, stage1_results, stage2_results,
+                chairman_model=request.chairman_model,
+                on_progress=on_stage3_progress,
+            )
+
+            # Send any stage3 retry events that occurred
+            for evt_type, evt_data in stage3_retry_events:
+                yield f"data: {json.dumps({'type': evt_type, 'data': evt_data})}\n\n"
+
             yield f"data: {json.dumps({'type': 'stage3_complete', 'data': stage3_result})}\n\n"
 
             # Wait for title generation if it was started

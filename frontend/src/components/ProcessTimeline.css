@@ -143,3 +143,33 @@
 .chairman-body th,.chairman-body td { border:1px solid #334155; padding:5px 8px; text-align:left; }
 .chairman-body th { background:rgba(255,255,255,.05); }
 .chairman-body strong { color:#fbbf24; }
+
+/* ===== FAILED PANEL (Stage 1) ===== */
+.panel.failed { opacity:0.85; }
+.panel.failed .panel-body { display:flex; align-items:center; justify-content:center; min-height:100px; }
+.panel-error-badge { font-size:10px; font-weight:700; padding:2px 8px; border-radius:10px; background:rgba(239,68,68,0.2); color:#fca5a5; border:1px solid rgba(239,68,68,0.3); }
+.panel-fail { text-align:center; padding:16px 8px; }
+.panel-fail-icon { font-size:28px; margin-bottom:6px; }
+.panel-fail-type { font-size:13px; font-weight:700; color:#fca5a5; margin-bottom:4px; }
+.panel-fail-detail { font-size:11px; color:#94a3b8; line-height:1.4; word-break:break-word; max-height:80px; overflow-y:auto; }
+
+/* ===== CHAIRMAN ERROR (Stage 3) ===== */
+.chairman-error { background:rgba(239,68,68,0.04); border-color:rgba(239,68,68,0.2); }
+.chairman-error .chairman-head { color:#fca5a5; }
+.chairman-fail-badge { font-size:11px; font-weight:700; padding:2px 8px; border-radius:10px; background:rgba(239,68,68,0.2); color:#fca5a5; border:1px solid rgba(239,68,68,0.3); }
+.chairman-fail-body { padding:8px 0; }
+.chairman-fail-msg { display:flex; align-items:center; gap:8px; font-size:14px; font-weight:600; color:#fca5a5; margin-bottom:6px; }
+.chairman-fail-icon { font-size:22px; }
+.chairman-fail-detail { font-size:12px; color:#94a3b8; margin-bottom:12px; word-break:break-word; }
+.chairman-attempts { font-size:12px; padding:10px; background:rgba(255,255,255,.03); border-radius:6px; border:1px solid rgba(255,255,255,.06); }
+.chairman-attempts strong { color:#60a5fa; }
+.chairman-attempts ul { margin:6px 0 0; padding-left:18px; }
+.chairman-attempts li { margin:3px 0; }
+.attempt-ok { color:#4ade80; }
+.attempt-fail { color:#fca5a5; }
+.chairman-backup-note { font-size:11px; color:#f59e0b; font-weight:400; }
+.chairman-retry-note { font-size:11px; color:#94a3b8; font-weight:400; }
+
+/* Chairman retrying animation */
+.chairman-wait.retrying { border-color:rgba(239,68,68,0.3); background:rgba(245,158,11,0.06); }
+.chairman-wait.retrying .chairman-icon { animation:spin-retry 1s linear infinite; }

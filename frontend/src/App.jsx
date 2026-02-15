@@ -134,8 +134,12 @@ function App() {
             updateLastMsg((m) => ({ loading: { ...m.loading, stage3: true } }));
             break;
 
+          case 'stage3_retry':
+            updateLastMsg(() => ({ stage3RetryInfo: event.data }));
+            break;
+
           case 'stage3_complete':
-            updateLastMsg((m) => ({ stage3: event.data, loading: { ...m.loading, stage3: false } }));
+            updateLastMsg((m) => ({ stage3: event.data, stage3RetryInfo: null, loading: { ...m.loading, stage3: false } }));
             break;
 
           case 'title_complete':
