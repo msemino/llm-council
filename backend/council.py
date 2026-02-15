@@ -1,16 +1,49 @@
-"""3-stage LLM Council orchestration."""
+"""
+Three-stage LLM Council orchestration engine.
+
+Implements the core "battle arena" pipeline:
+
+    Stage 1 — Collect Responses:
+        Send the user's question to N models in parallel. Retry failed models
+        once, then fall back to ``BACKUP_MODELS`` to guarantee at least
+        ``MIN_RESPONSES`` (2) successful replies.
+
+    Stage 2 — Cross-Evaluation:
+        Each model receives the anonymized responses ("Response A", "Response B",
+        …) and produces a structured ranking with justification. An aggregate
+        ranking is computed by averaging each model's position across all
+        evaluators.
+
+    Stage 3 — Chairman Synthesis:
+        A designated "chairman" model reads every response and every evaluation,
+        then writes a concise (3-4 paragraph) final verdict. If the chairman
+        fails, the system retries once and then tries every ``BACKUP_MODELS``
+        entry sequentially.
+
+Motor de orquestación del Consejo LLM en tres etapas.
+
+Implementa el pipeline principal de la "arena de batalla":
+
+    Etapa 1 — Recopilar respuestas en paralelo con retry/fallback.
+    Etapa 2 — Evaluación cruzada anónima entre modelos.
+    Etapa 3 — Síntesis final del presidente con retry/fallback.
+
+All model responses are in Spanish (enforced via system prompts).
+"""
 
 from typing import List, Dict, Any, Tuple, Optional, Callable
 from .openrouter import query_models_parallel, query_model, fetch_free_models
 from .config import COUNCIL_MODELS, CHAIRMAN_MODEL
 
-# Minimum number of successful responses required for a meaningful battle
-MIN_RESPONSES = 2
-# Max retry rounds before giving up
-MAX_RETRY_ROUNDS = 2
+# ---------------------------------------------------------------------------
+# Resilience Constants
+# ---------------------------------------------------------------------------
+MIN_RESPONSES: int = 2       # Minimum successful replies for a valid battle
+MAX_RETRY_ROUNDS: int = 2    # Max retry iterations before giving up
 
-# Reliable backup models to try when primary models fail
-BACKUP_MODELS = [
+# Backup models tried (in order) when primary models fail.
+# Chosen for reliability and diversity across providers.
+BACKUP_MODELS: list[str] = [
     "google/gemma-3-12b-it:free",
     "google/gemma-3-4b-it:free",
     "mistralai/mistral-small-3.1-24b-instruct:free",

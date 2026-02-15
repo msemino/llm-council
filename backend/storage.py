@@ -1,4 +1,31 @@
-"""JSON-based storage for conversations."""
+"""
+JSON file-based persistence layer for conversations.
+
+Each conversation is stored as a standalone JSON file under ``DATA_DIR``
+(default: ``data/conversations/``). This keeps the project dependency-free
+from external databases while still supporting full CRUD operations and
+conversation history.
+
+Capa de persistencia basada en archivos JSON para conversaciones.
+
+Cada conversación se almacena como un archivo JSON independiente bajo
+``DATA_DIR``. Esto mantiene el proyecto libre de dependencias de bases
+de datos externas mientras soporta operaciones CRUD completas y el
+historial de conversaciones.
+
+File Structure:
+    Each file is named ``<conversation_id>.json`` and contains::
+
+        {
+            "id": "uuid-string",
+            "created_at": "ISO-8601 timestamp",
+            "title": "Auto-generated or default title",
+            "messages": [
+                {"role": "user", "content": "..."},
+                {"role": "assistant", "stage1": [...], "stage2": [...], "stage3": {...}}
+            ]
+        }
+"""
 
 import json
 import os

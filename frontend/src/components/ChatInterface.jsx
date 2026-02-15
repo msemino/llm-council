@@ -1,3 +1,16 @@
+/**
+ * @fileoverview Main chat interface — message history + battle visualization.
+ *
+ * Renders user messages, embeds the ProcessTimeline arena view for each
+ * assistant response, provides collapsible detailed-stage views (Stage1,
+ * Stage2), and includes the ModelSelector configuration panel with the
+ * message input form.
+ *
+ * Interfaz de chat principal — historial de mensajes + visualización de batalla.
+ *
+ * @module ChatInterface
+ */
+
 import { useState, useEffect, useRef } from 'react';
 import ReactMarkdown from 'react-markdown';
 import Stage1 from './Stage1';
@@ -7,6 +20,14 @@ import ProcessTimeline from './ProcessTimeline';
 import ModelSelector from './ModelSelector';
 import './ChatInterface.css';
 
+/**
+ * @param {Object} props
+ * @param {Object|null} props.conversation - Current conversation (null = welcome screen).
+ * @param {(content: string) => Promise<void>} props.onSendMessage - Send user message handler.
+ * @param {boolean} props.isLoading - True while a battle is running.
+ * @param {(config: Object) => void} props.onModelConfigChange - Model config change callback.
+ * @returns {JSX.Element}
+ */
 export default function ChatInterface({
   conversation,
   onSendMessage,

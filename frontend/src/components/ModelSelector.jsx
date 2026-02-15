@@ -1,6 +1,22 @@
+/**
+ * @fileoverview Dynamic model selector for configuring council battles.
+ *
+ * Fetches the live catalogue of free OpenRouter models on mount and lets the
+ * user pick 2-6 competing models (Stages 1 & 2) plus a separate chairman
+ * model (Stage 3). Configuration changes are propagated to the parent via
+ * the `onConfigChange` callback.
+ *
+ * Selector dinámico de modelos para configurar las batallas del consejo.
+ * Obtiene el catálogo de modelos gratuitos de OpenRouter y permite al usuario
+ * elegir 2-6 modelos competidores más un modelo presidente separado.
+ *
+ * @module ModelSelector
+ */
+
 import { useState, useEffect } from 'react';
 import './ModelSelector.css';
 
+/** @constant {Object.<string, string>} Emoji map for known model families. */
 const MODEL_EMOJIS = {
   'deepseek': '🧠', 'llama': '🦙', 'gemma': '💎', 'qwen': '🐉',
   'gpt': '🤖', 'claude': '🎭', 'mistral': '🌪️', 'nvidia': '🟢',
@@ -9,6 +25,7 @@ const MODEL_EMOJIS = {
   'upstage': '🔼', 'trinity': '🔺',
 };
 
+/** Resolve emoji for a model id by matching against known family names. */
 function getEmoji(modelId) {
   const lower = modelId.toLowerCase();
   for (const [key, emoji] of Object.entries(MODEL_EMOJIS)) {
@@ -21,6 +38,14 @@ function shortId(id) {
   return id.split('/').pop()?.replace(':free', '') || id;
 }
 
+/**
+ * Collapsible configuration panel for battle parameters.
+ *
+ * @param {Object} props
+ * @param {(config: {council_models: string[], chairman_model: string}) => void} props.onConfigChange
+ * @param {boolean} props.disabled - Disable controls while a battle is in progress.
+ * @returns {JSX.Element}
+ */
 export default function ModelSelector({ onConfigChange, disabled }) {
   const [freeModels, setFreeModels] = useState([]);
   const [loading, setLoading] = useState(true);
