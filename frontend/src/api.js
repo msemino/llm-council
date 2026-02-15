@@ -1,12 +1,25 @@
 /**
- * API client for the LLM Council backend.
+ * @fileoverview HTTP + SSE client for the LLM Council backend API.
+ *
+ * Provides CRUD operations for conversations and a streaming method that
+ * consumes Server-Sent Events (SSE) to progressively deliver the 3-stage
+ * council pipeline results to the UI.
+ *
+ * Cliente HTTP + SSE para la API del backend LLM Council.
+ * Provee operaciones CRUD para conversaciones y un método de streaming
+ * que consume SSE para entregar progresivamente los resultados del
+ * pipeline de 3 etapas a la UI.
+ *
+ * @module api
  */
 
+/** @constant {string} Base URL for the FastAPI backend (default dev port). */
 const API_BASE = 'http://localhost:8001';
 
 export const api = {
   /**
-   * List all conversations.
+   * Fetch metadata for all conversations (id, title, message_count).
+   * @returns {Promise<Array<{id: string, title: string, message_count: number}>>}
    */
   async listConversations() {
     const response = await fetch(`${API_BASE}/api/conversations`);
@@ -17,7 +30,8 @@ export const api = {
   },
 
   /**
-   * Create a new conversation.
+   * Create a new empty conversation on the backend.
+   * @returns {Promise<{id: string, created_at: string, title: string, messages: Array}>}
    */
   async createConversation() {
     const response = await fetch(`${API_BASE}/api/conversations`, {
@@ -34,7 +48,9 @@ export const api = {
   },
 
   /**
-   * Get a specific conversation.
+   * Load a full conversation (with all messages and stage data).
+   * @param {string} conversationId - UUID of the conversation to retrieve.
+   * @returns {Promise<Object>} Full conversation payload.
    */
   async getConversation(conversationId) {
     const response = await fetch(
@@ -47,7 +63,10 @@ export const api = {
   },
 
   /**
-   * Send a message in a conversation.
+   * Send a message and wait for the complete 3-stage result (non-streaming).
+   * @param {string} conversationId - Target conversation UUID.
+   * @param {string} content - User's question text.
+   * @returns {Promise<{stage1: Array, stage2: Array, stage3: Object, metadata: Object}>}
    */
   async sendMessage(conversationId, content) {
     const response = await fetch(
@@ -67,11 +86,22 @@ export const api = {
   },
 
   /**
-   * Send a message and receive streaming updates.
-   * @param {string} conversationId - The conversation ID
-   * @param {string} content - The message content
-   * @param {function} onEvent - Callback function for each event: (eventType, data) => void
-   * @returns {Promise<void>}
+   * Send a message and consume the SSE stream for real-time progress.
+   *
+   * Opens a long-lived POST request to the ``/message/stream`` endpoint and
+   * reads ``text/event-stream`` chunks. Each parsed event is forwarded to
+   * the ``onEvent`` callback so the UI can update progressively.
+   *
+   * @param {string} conversationId - Target conversation UUID.
+   * @param {string} content - User's question text.
+   * @param {(eventType: string, event: Object) => void} onEvent
+   *   Callback invoked for every SSE event. ``eventType`` is one of:
+   *   ``stage1_start``, ``stage1_retry``, ``stage1_complete``,
+   *   ``stage2_start``, ``stage2_complete``,
+   *   ``stage3_start``, ``stage3_retry``, ``stage3_complete``,
+   *   ``title_complete``, ``complete``, ``error``.
+   * @param {Object} [modelConfig={}] - Optional ``{council_models, chairman_model}`` overrides.
+   * @returns {Promise<void>} Resolves when the stream closes.
    */
   async sendMessageStream(conversationId, content, onEvent, modelConfig = {}) {
     const response = await fetch(

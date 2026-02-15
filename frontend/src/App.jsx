@@ -1,9 +1,34 @@
+/**
+ * @fileoverview Root application component for the LLM Council frontend.
+ *
+ * Manages global state (conversations, current selection, loading, model config)
+ * and coordinates communication between the Sidebar, ChatInterface, and the
+ * backend SSE streaming API.
+ *
+ * Componente raíz de la aplicación LLM Council.
+ * Gestiona el estado global y coordina la comunicación entre el Sidebar,
+ * ChatInterface y la API de streaming SSE del backend.
+ *
+ * @module App
+ */
+
 import { useState, useEffect } from 'react';
 import Sidebar from './components/Sidebar';
 import ChatInterface from './components/ChatInterface';
 import { api } from './api';
 import './App.css';
 
+/**
+ * Root component that wires Sidebar ↔ ChatInterface ↔ Backend.
+ *
+ * State flow:
+ *   1. User selects/creates a conversation → updates `currentConversationId`.
+ *   2. User sends a message → `handleSendMessage` opens an SSE stream.
+ *   3. Each SSE event progressively updates the last assistant message in
+ *      `currentConversation.messages` (optimistic UI pattern).
+ *
+ * @returns {JSX.Element}
+ */
 function App() {
   const [conversations, setConversations] = useState([]);
   const [currentConversationId, setCurrentConversationId] = useState(null);

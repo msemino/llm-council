@@ -1,4 +1,31 @@
-"""FastAPI backend for LLM Council."""
+"""
+FastAPI REST + SSE backend for the LLM Council application.
+
+Exposes a RESTful API for conversation management and a Server-Sent Events
+(SSE) streaming endpoint that pushes real-time progress updates to the
+frontend as each of the three council stages executes.
+
+Backend REST + SSE de FastAPI para la aplicación LLM Council.
+
+Expone una API REST para gestión de conversaciones y un endpoint de
+streaming SSE que envía actualizaciones de progreso en tiempo real al
+frontend a medida que se ejecuta cada una de las tres etapas del consejo.
+
+API Endpoints:
+    GET  /                                        → Health check.
+    GET  /api/models/free                         → List free OpenRouter models (10-min cache).
+    GET  /api/conversations                       → List all conversations (metadata).
+    POST /api/conversations                       → Create a new conversation.
+    GET  /api/conversations/{id}                  → Get full conversation with messages.
+    POST /api/conversations/{id}/message          → Synchronous 3-stage council execution.
+    POST /api/conversations/{id}/message/stream   → SSE streaming of 3-stage council.
+
+SSE Event Types (streamed to frontend):
+    stage1_start, stage1_retry, stage1_complete,
+    stage2_start, stage2_complete,
+    stage3_start, stage3_retry, stage3_complete,
+    title_complete, complete, error.
+"""
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -11,12 +38,25 @@ import asyncio
 import time
 
 from . import storage
-from .council import run_full_council, generate_conversation_title, stage1_collect_responses, stage2_collect_rankings, stage3_synthesize_final, calculate_aggregate_rankings
+from .council import (
+    run_full_council,
+    generate_conversation_title,
+    stage1_collect_responses,
+    stage2_collect_rankings,
+    stage3_synthesize_final,
+    calculate_aggregate_rankings,
+)
 from .openrouter import fetch_free_models
 
-app = FastAPI(title="LLM Council API")
+app = FastAPI(
+    title="LLM Council API",
+    description="Battle arena backend for multi-model LLM evaluation.",
+    version="1.0.0",
+)
 
-# Enable CORS for local development
+# ---------------------------------------------------------------------------
+# CORS — allow the Vite dev server and common local ports
+# ---------------------------------------------------------------------------
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:5173", "http://localhost:3000"],
@@ -25,26 +65,38 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Cache for free models list
+# ---------------------------------------------------------------------------
+# In-memory cache for the free-models catalogue (refreshed every 10 min)
+# ---------------------------------------------------------------------------
 _free_models_cache: Optional[List[Dict[str, Any]]] = None
 _free_models_cache_time: float = 0
-FREE_MODELS_CACHE_TTL = 600  # 10 minutes in seconds
+FREE_MODELS_CACHE_TTL: int = 600  # seconds
 
 
+# ---------------------------------------------------------------------------
+# Pydantic request / response schemas
+# ---------------------------------------------------------------------------
 class CreateConversationRequest(BaseModel):
-    """Request to create a new conversation."""
+    """Empty body — conversations are created with a server-generated UUID."""
     pass
 
 
 class SendMessageRequest(BaseModel):
-    """Request to send a message in a conversation."""
+    """
+    Payload for sending a user message and triggering the council pipeline.
+
+    Attributes:
+        content: The user's question or prompt text.
+        council_models: Optional override for which models compete in Stages 1 & 2.
+        chairman_model: Optional override for the Stage 3 chairman model.
+    """
     content: str
     council_models: Optional[List[str]] = None
     chairman_model: Optional[str] = None
 
 
 class ConversationMetadata(BaseModel):
-    """Conversation metadata for list view."""
+    """Lightweight conversation summary for the sidebar list."""
     id: str
     created_at: str
     title: str
@@ -52,7 +104,7 @@ class ConversationMetadata(BaseModel):
 
 
 class Conversation(BaseModel):
-    """Full conversation with all messages."""
+    """Full conversation payload including all messages and stage data."""
     id: str
     created_at: str
     title: str
@@ -61,13 +113,13 @@ class Conversation(BaseModel):
 
 @app.get("/")
 async def root():
-    """Health check endpoint."""
+    """Health-check endpoint. Returns service name and ``"ok"`` status."""
     return {"status": "ok", "service": "LLM Council API"}
 
 
 @app.get("/api/models/free")
 async def list_free_models():
-    """List free models available on OpenRouter. Cached for 10 minutes."""
+    """Return the catalogue of free OpenRouter models (TTL-cached 10 min)."""
     global _free_models_cache, _free_models_cache_time
 
     now = time.time()
@@ -106,8 +158,10 @@ async def get_conversation(conversation_id: str):
 @app.post("/api/conversations/{conversation_id}/message")
 async def send_message(conversation_id: str, request: SendMessageRequest):
     """
-    Send a message and run the 3-stage council process.
-    Returns the complete response with all stages.
+    Synchronous endpoint: run the full 3-stage council and return results.
+
+    Useful for programmatic access; the frontend typically uses the
+    ``/stream`` variant below for real-time progress.
     """
     # Check if conversation exists
     conversation = storage.get_conversation(conversation_id)
@@ -152,8 +206,15 @@ async def send_message(conversation_id: str, request: SendMessageRequest):
 @app.post("/api/conversations/{conversation_id}/message/stream")
 async def send_message_stream(conversation_id: str, request: SendMessageRequest):
     """
-    Send a message and stream the 3-stage council process.
-    Returns Server-Sent Events as each stage completes.
+    SSE streaming endpoint for the 3-stage council pipeline.
+
+    Emits ``text/event-stream`` events as each stage starts, retries, and
+    completes.  The frontend consumes these events to progressively render
+    the battle arena UI in real time.
+
+    Event flow: ``stage1_start → [stage1_retry …] → stage1_complete →
+    stage2_start → stage2_complete → stage3_start → [stage3_retry …] →
+    stage3_complete → title_complete → complete``.
     """
     # Check if conversation exists
     conversation = storage.get_conversation(conversation_id)

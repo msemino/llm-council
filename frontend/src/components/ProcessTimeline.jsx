@@ -1,7 +1,34 @@
+/**
+ * @fileoverview Battle Arena visualization component (ProcessTimeline).
+ *
+ * Renders the three-round council pipeline as a real-time, visually rich
+ * timeline with side-by-side model panels, cross-evaluation tabs, a podium
+ * ranking chart, and the chairman's final verdict.
+ *
+ * Componente de visualización de la Arena de Batalla (ProcessTimeline).
+ * Renderiza el pipeline de tres rondas del consejo como un timeline visual
+ * en tiempo real con paneles lado a lado, pestañas de evaluación cruzada,
+ * podio de ranking y veredicto final del presidente.
+ *
+ * Visual States:
+ *   - Loading (shimmer placeholders + live timer)
+ *   - Failed model panels (red, with error type badge)
+ *   - Retry banners (Stage 1 retry, Stage 3 chairman fallback)
+ *   - Completed panels with markdown-rendered responses
+ *   - Podium with color-coded bars and medal emojis
+ *
+ * @module ProcessTimeline
+ */
+
 import { useState, useEffect } from 'react';
 import ReactMarkdown from 'react-markdown';
 import './ProcessTimeline.css';
 
+/**
+ * Color theme mapping for known model families.
+ * Each entry provides an emoji, accent color, and translucent bg/border.
+ * @constant {Object.<string, {emoji: string, color: string, bg: string, border: string}>}
+ */
 const MODEL_COLORS = {
   'deepseek': { emoji: '🧠', color: '#4a6cf7', bg: 'rgba(74,108,247,0.08)', border: 'rgba(74,108,247,0.3)' },
   'llama':    { emoji: '🦙', color: '#f97316', bg: 'rgba(249,115,22,0.08)', border: 'rgba(249,115,22,0.3)' },
@@ -21,6 +48,12 @@ const MODEL_COLORS = {
   'gemini':   { emoji: '✨', color: '#60a5fa', bg: 'rgba(96,165,250,0.08)', border: 'rgba(96,165,250,0.3)' },
 };
 
+/**
+ * Resolve the color theme for a model by matching its name against known families.
+ * Falls back to a neutral grey theme for unknown models.
+ * @param {string} modelName - Full model identifier (e.g., "deepseek/deepseek-r1-0528:free").
+ * @returns {{emoji: string, color: string, bg: string, border: string}}
+ */
 function getMeta(modelName) {
   const lower = modelName.toLowerCase();
   for (const [key, val] of Object.entries(MODEL_COLORS)) {
@@ -29,10 +62,22 @@ function getMeta(modelName) {
   return { emoji: '🤖', color: '#6b7280', bg: 'rgba(107,114,128,0.08)', border: 'rgba(107,114,128,0.3)' };
 }
 
+/**
+ * Extract a human-readable short name from a full model identifier.
+ * E.g., "deepseek/deepseek-r1-0528:free" → "deepseek-r1-0528".
+ * @param {string} model - Full OpenRouter model identifier.
+ * @returns {string} Shortened display name.
+ */
 function shortName(model) {
   return model.split('/')[1]?.replace(':free', '').replace('-thinking-2507', '') || model;
 }
 
+/**
+ * Map an error_type code to a user-friendly Spanish label with emoji.
+ * @param {string} errorType - One of: timeout, rate_limit, http_error, api_error,
+ *   empty_response, no_response, all_failed, unknown.
+ * @returns {string} Localized label (e.g., "🚫 Rate Limit").
+ */
 function getErrorLabel(errorType) {
   const labels = {
     'timeout': '⏱️ Timeout',
@@ -47,6 +92,13 @@ function getErrorLabel(errorType) {
   return labels[errorType] || labels['unknown'];
 }
 
+/**
+ * Replace anonymous labels ("Response A", "Response B") in evaluation text
+ * with the actual model names (bolded) for de-anonymized display.
+ * @param {string} text - Evaluation text containing anonymous labels.
+ * @param {Object.<string, string>} labelToModel - Map from label to model id.
+ * @returns {string} Text with labels replaced by model names.
+ */
 function deAnonymize(text, labelToModel) {
   if (!labelToModel || !text) return text;
   let result = text;
@@ -56,6 +108,19 @@ function deAnonymize(text, labelToModel) {
   return result;
 }
 
+/**
+ * Battle Arena timeline — the main visual component of the LLM Council.
+ *
+ * Renders three progressive sections (rounds) as the backend streams results:
+ *   Round 1: Side-by-side response panels (success/failed/loading states).
+ *   Round 2: Cross-evaluation tabs + aggregated podium ranking.
+ *   Round 3: Chairman verdict (with retry/fallback status).
+ *
+ * @param {Object} props
+ * @param {Object} props.message - The assistant message object from App state.
+ * @param {boolean} props.isLoading - Whether a battle is currently in progress.
+ * @returns {JSX.Element|null} The arena UI, or null if message is not an assistant message.
+ */
 export default function ProcessTimeline({ message, isLoading }) {
   const [elapsed, setElapsed] = useState({ s1: 0, s2: 0, s3: 0 });
   const [starts, setStarts] = useState({ s1: null, s2: null, s3: null });

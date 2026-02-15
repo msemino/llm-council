@@ -1,6 +1,25 @@
+/**
+ * @fileoverview Sidebar navigation — conversation list and creation button.
+ *
+ * Displays the "Consejo LLM" branding, a "+ Nueva Conversacion" button,
+ * and a scrollable list of past conversations with title and message count.
+ *
+ * Barra lateral de navegación — lista de conversaciones y botón de creación.
+ *
+ * @module Sidebar
+ */
+
 import { useState, useEffect } from 'react';
 import './Sidebar.css';
 
+/**
+ * @param {Object} props
+ * @param {Array<{id: string, title: string, message_count: number}>} props.conversations
+ * @param {string|null} props.currentConversationId - Highlighted conversation.
+ * @param {(id: string) => void} props.onSelectConversation
+ * @param {() => void} props.onNewConversation
+ * @returns {JSX.Element}
+ */
 export default function Sidebar({
   conversations,
   currentConversationId,

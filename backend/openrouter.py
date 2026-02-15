@@ -1,4 +1,30 @@
-"""OpenRouter API client for making LLM requests."""
+"""
+OpenRouter API client for querying Large Language Models.
+
+Provides an asynchronous HTTP client that communicates with the OpenRouter
+unified API gateway (https://openrouter.ai). Supports single-model queries,
+parallel multi-model queries, and free-model discovery.
+
+Cliente API de OpenRouter para consultar modelos de lenguaje.
+
+Proporciona un cliente HTTP asíncrono que se comunica con el gateway unificado
+de OpenRouter. Soporta consultas a un solo modelo, consultas paralelas a
+múltiples modelos y descubrimiento de modelos gratuitos.
+
+Error Handling Strategy:
+    Instead of returning ``None`` on failure, every function returns a dict
+    with ``error``, ``error_type``, and ``content: None`` keys. This enables
+    the frontend to display specific failure reasons (timeout, rate_limit,
+    http_error, api_error, empty_response, unknown) per model.
+
+Typical error_type values:
+    - ``timeout``: Request exceeded the configured timeout.
+    - ``rate_limit``: HTTP 429 — provider rate limit exceeded.
+    - ``http_error``: Non-429 HTTP status error from the provider.
+    - ``api_error``: Error embedded in the OpenRouter JSON response body.
+    - ``empty_response``: API returned 200 but with no ``choices``.
+    - ``unknown``: Unexpected exception.
+"""
 
 import httpx
 from typing import List, Dict, Any, Optional
@@ -8,19 +34,26 @@ from .config import OPENROUTER_API_KEY, OPENROUTER_API_URL
 async def query_model(
     model: str,
     messages: List[Dict[str, str]],
-    timeout: float = 120.0
+    timeout: float = 120.0,
 ) -> Optional[Dict[str, Any]]:
     """
-    Query a single model via OpenRouter API.
+    Query a single model via the OpenRouter chat completions endpoint.
+
+    Sends a list of chat messages to the specified model and returns the
+    assistant's reply. On any failure (network, HTTP, API-level), returns
+    a structured error dict rather than ``None`` so callers can distinguish
+    failure modes.
+
+    Consulta un solo modelo a través del endpoint de completions de OpenRouter.
 
     Args:
-        model: OpenRouter model identifier (e.g., "openai/gpt-4o")
-        messages: List of message dicts with 'role' and 'content'
-        timeout: Request timeout in seconds
+        model: OpenRouter model identifier (e.g., ``"deepseek/deepseek-r1-0528:free"``).
+        messages: Conversation history as a list of ``{"role": ..., "content": ...}`` dicts.
+        timeout: Maximum seconds to wait for a response (default 120s).
 
     Returns:
-        Response dict with 'content' and optional 'reasoning_details', or None if failed.
-        On failure, returns dict with 'error' and 'error_type' keys instead of None.
+        On success: ``{"content": str, "reasoning_details": Optional[str]}``.
+        On failure: ``{"error": str, "error_type": str, "content": None}``.
     """
     headers = {
         "Authorization": f"Bearer {OPENROUTER_API_KEY}",
@@ -84,17 +117,24 @@ async def query_model(
 
 async def query_models_parallel(
     models: List[str],
-    messages: List[Dict[str, str]]
+    messages: List[Dict[str, str]],
 ) -> Dict[str, Optional[Dict[str, Any]]]:
     """
-    Query multiple models in parallel.
+    Query multiple models concurrently using ``asyncio.gather``.
+
+    Sends the same message history to every model in *models* simultaneously.
+    Each model's response (or error dict) is collected and returned as a
+    mapping keyed by model identifier.
+
+    Consulta múltiples modelos en paralelo usando ``asyncio.gather``.
 
     Args:
-        models: List of OpenRouter model identifiers
-        messages: List of message dicts to send to each model
+        models: List of OpenRouter model identifiers to query in parallel.
+        messages: Chat message history sent identically to every model.
 
     Returns:
-        Dict mapping model identifier to response dict (or None if failed)
+        Dict mapping each model identifier to its response dict (success or
+        error). Iteration order matches *models*.
     """
     import asyncio
 
@@ -110,13 +150,21 @@ async def query_models_parallel(
 
 async def fetch_free_models(timeout: float = 30.0) -> List[Dict[str, Any]]:
     """
-    Fetch the list of free models from OpenRouter's /api/v1/models endpoint.
+    Discover all zero-cost models available on OpenRouter.
+
+    Queries the ``/api/v1/models`` catalogue and filters for models where
+    both prompt and completion pricing are exactly ``0``. Results are sorted
+    alphabetically by display name and cached by the caller (see ``main.py``).
+
+    Descubre todos los modelos de costo cero disponibles en OpenRouter.
 
     Args:
-        timeout: Request timeout in seconds
+        timeout: Maximum seconds to wait for the catalogue response.
 
     Returns:
-        List of dicts with 'id', 'name', 'context_length', and 'pricing' for each free model
+        Sorted list of dicts, each containing:
+        ``{"id": str, "name": str, "context_length": int, "pricing": dict}``.
+        Returns an empty list on any network or parsing error.
     """
     headers = {
         "Authorization": f"Bearer {OPENROUTER_API_KEY}",
