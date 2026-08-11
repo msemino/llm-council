@@ -2,7 +2,7 @@
 
 > **Multi-model LLM evaluation platform** with a real-time battle arena UI, dynamic free-model selector, automatic retry/fallback, and full Spanish language support.
 
-Custom fork of [Karpathy's llm-council](https://github.com/karpathy/llm-council) — rebuilt from scratch with a production-quality React frontend, FastAPI + SSE streaming backend, and resilient error handling.
+Fork of [Karpathy's llm-council](https://github.com/karpathy/llm-council). **16 of its 39 files diverge from upstream** — the whole `backend/`, plus `api.js`, `App.jsx` and the four stage components, which is where the arena UI, the dynamic model selector and the retry/fallback live. The other 23 are upstream's, byte for byte: build config, base styles, `main.jsx`, assets. [What this fork adds](#differences-vs-karpathys-original) is a table below, and it is the honest scope of the work.
 
 ---
 
@@ -229,9 +229,14 @@ The system is designed to handle the inherent unreliability of free-tier API mod
 - **Structured Error Types**: Every failure returns a typed error (`timeout`, `rate_limit`, `http_error`, `api_error`, `empty_response`, `unknown`) displayed in the UI with specific icons and labels.
 - **Attempt History**: The chairman's result includes a full `attempts` array showing every model tried and its outcome, visible in the UI.
 
+## License
+
+There is deliberately no LICENSE file here. Upstream ships none, so more than half of this tree is
+not mine to relicense — see [NOTICE.md](NOTICE.md) for the split and for how to verify it yourself.
+
 ## Credits
 
-- **Original concept:** [Andrej Karpathy](https://github.com/karpathy/llm-council)
+- **Original concept and the code this forks from:** [Andrej Karpathy](https://github.com/karpathy/llm-council)
 - **Fork with arena UI, dynamic selector, retry/fallback, and Spanish:** [Marcelo Semino](https://github.com/msemino)
 - **Vibe coded with** Claude Code (Opus 4.6)
 
@@ -243,7 +248,7 @@ The system is designed to handle the inherent unreliability of free-tier API mod
 
 > **Plataforma de evaluación multi-modelo de LLMs** con UI de arena de batalla en tiempo real, selector dinámico de modelos gratuitos, retry/fallback automático, y soporte completo en español.
 
-Fork personalizado del [llm-council de Karpathy](https://github.com/karpathy/llm-council) — reconstruido desde cero con un frontend React de calidad producción, backend FastAPI + streaming SSE, y manejo de errores resiliente.
+Fork del [llm-council de Karpathy](https://github.com/karpathy/llm-council). **16 de sus 39 archivos difieren del upstream** — todo `backend/`, más `api.js`, `App.jsx` y los cuatro componentes de etapa, que es donde viven la UI de arena, el selector dinámico de modelos y el retry/fallback. Los otros 23 son del upstream, byte a byte: config de build, estilos base, `main.jsx`, assets. Lo que agrega este fork está en la tabla de abajo, y ese es el alcance real del trabajo.
 
 ---
 
@@ -363,8 +368,14 @@ El sistema está diseñado para manejar la inestabilidad inherente de las APIs d
 - **Tipos de Error Estructurados**: Cada falla retorna un tipo (`timeout`, `rate_limit`, `http_error`, `api_error`, `empty_response`, `unknown`) con íconos y etiquetas específicos en la UI.
 - **Historial de Intentos**: El resultado del presidente incluye un array `attempts` con cada modelo intentado y su resultado, visible en la UI.
 
+## Licencia
+
+A propósito no hay LICENSE acá. El upstream no publica ninguna, así que más de la mitad de este
+árbol no es mío para relicenciar — el detalle del corte y cómo verificarlo está en
+[NOTICE.md](NOTICE.md).
+
 ## Créditos
 
-- **Concepto original:** [Andrej Karpathy](https://github.com/karpathy/llm-council)
+- **Concepto original y el código del que sale este fork:** [Andrej Karpathy](https://github.com/karpathy/llm-council)
 - **Fork con arena UI, selector dinámico, retry/fallback, y español:** [Marcelo Semino](https://github.com/msemino)
 - **Vibe coded con** Claude Code (Opus 4.6)
